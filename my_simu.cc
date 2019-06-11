@@ -1,8 +1,8 @@
 /**
- * Modified based on the example cohesive_extrinsic.cc 
- * 
- * Modified by: 
- * 
+ * Modified based on the example cohesive_extrinsic.cc
+ *
+ * Modified by:
+ *
  * Information for the original file:
  *
  * @file   cohesive_extrinsic.cc
@@ -42,7 +42,55 @@
 
 using namespace akantu;
 
-int main(int argc, char * argv[]) {
+class InternalFieldSetter {
+public:
+  InternalFieldSetter(SolidMechanicsModel &model, const ID &material)
+      : model(model), material(model.getMaterial(material)),
+        quadrature_points("quadrature_points:" + material,
+                          "internal_field_setter") {
+    quadrature_points.initialize(model.getFEEngine(), _all_ghost_types = true,
+                                 _element_kind = _ek_not_defined,
+                                 _nb_component = model.getSpatialDimension());
+    model.getFEEngine().interpolateOnIntegrationPoints(
+        model.getMesh().getNodes(), quadrature_points,
+        &this->material.getElementFilter());
+  }
+
+  template <class Func, class... Ns>
+  void setField(const ID &field_id, Func &&func, Ns... ns) {
+    auto &&field = this->material.getInternal<Real>(field_id);
+    auto &&fe_engine = model.getFEEngine();
+
+    IntegrationPoint qp;
+    for (auto ghost_type : ghost_types) {
+      qp.ghost_type = ghost_type;
+      for (auto type :
+           field.elementTypes(_all_dimensions, ghost_type, _ek_not_defined)) {
+        qp.type = type;
+        auto nb_quadrature_points = fe_engine.getNbIntegrationPoints(type);
+        auto &&field_array = field(type, ghost_type);
+
+        for (auto &&data : zip(arange(field_array.size()),
+                               make_view(quadrature_points(type, ghost_type),
+                                         model.getSpatialDimension()),
+                               make_view(field_array, ns...))) {
+          qp.element = std::get<0>(data) / nb_quadrature_points;
+          qp.num_point = std::get<0>(data) % nb_quadrature_points;
+
+          func(qp, std::get<1>(data), std::get<2>(data));
+        }
+      }
+    }
+  }
+
+private:
+  SolidMechanicsModel &model;
+  Material &material;
+
+  ElementTypeMapArray<Real> quadrature_points;
+};
+
+int main(int argc, char *argv[]) {
   initialize("material.dat", argc, argv);
 
   const UInt spatial_dimension = 2;
@@ -54,22 +102,23 @@ int main(int argc, char * argv[]) {
   SolidMechanicsModelCohesive model(mesh);
 
   /// model initialization
-  model.initFull(
-      _analysis_method = _explicit_lumped_mass,
-      _is_extrinsic = true);
+  model.initFull(_analysis_method = _explicit_lumped_mass,
+                 _is_extrinsic = true);
+
+  InternalFieldSetter steel_setter(model, "steel");
 
   Real time_step = model.getStableTimeStep() * 0.05;
   model.setTimeStep(time_step);
   std::cout << "Time step: " << time_step << std::endl;
 
-  CohesiveElementInserter & inserter = model.getElementInserter();
+  CohesiveElementInserter &inserter = model.getElementInserter();
   inserter.setLimit(_y, 0.30, 0.20);
   model.updateAutomaticInsertion();
 
-  Array<Real> & position = mesh.getNodes();
-  Array<Real> & velocity = model.getVelocity();
-  Array<bool> & boundary = model.getBlockedDOFs();
-  Array<Real> & displacement = model.getDisplacement();
+  Array<Real> &position = mesh.getNodes();
+  Array<Real> &velocity = model.getVelocity();
+  Array<bool> &boundary = model.getBlockedDOFs();
+  Array<Real> &displacement = model.getDisplacement();
 
   UInt nb_nodes = mesh.getNbNodes();
 
@@ -89,6 +138,7 @@ int main(int argc, char * argv[]) {
   model.addDumpField("internal_force");
   model.addDumpField("stress");
   model.addDumpField("grad_u");
+  model.addDumpField("delta_T");
   model.dump();
 
   /// initial conditions
@@ -98,6 +148,11 @@ int main(int argc, char * argv[]) {
     velocity(n, 1) = loading_rate * position(n, 1);
   }
 
+  Vector<Real> a{-1., -1.};
+  Vector<Real> b{1., 1.};
+  auto direction = (b - a).normalize();
+  auto L = (b - a).norm();
+
   /// Main loop
   for (UInt s = 1; s <= max_steps; ++s) {
 
@@ -106,16 +161,22 @@ int main(int argc, char * argv[]) {
     //   if (position(n, 1) > 0.99 || position(n, 1) < -0.99)
     //     displacement(n, 1) += disp_update * position(n, 1);
     // }
-    
+
     // Here I would like to create a temperature field which linearly changes
-    // from point (-1,-1) to point (1,1), the change is then gradually increasing
-    // to cause some thermal cracks. 
-    
+    // from point (-1,-1) to point (1,1), the change is then gradually
+    // increasing to cause some thermal cracks.
+
+    Real scale = 0.1 * s;
+    steel_setter.setField(
+        "delta_T", [&](IntegrationPoint qp, Vector<Real> &pos, Real &delta_T) {
+          delta_T = pos.dot(direction) / L * scale;
+        });
+
     model.checkCohesiveStress();
     model.solveStep();
 
     if (s % 10 == 0) {
-      model.dump();
+      model.dump(time_step * s, s);
 
       std::cout << "passing step " << s << "/" << max_steps << std::endl;
     }
