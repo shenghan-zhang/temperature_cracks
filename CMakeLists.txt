@@ -9,3 +9,5 @@ find_package(Akantu REQUIRED)
 set(CMAKE_CXX_STANDARD 14)
 
 add_akantu_simulation(my_simu my_simu.cc)
+
+add_akantu_simulation(my_simu_2 my_simu_2.cc)

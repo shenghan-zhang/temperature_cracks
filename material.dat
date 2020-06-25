@@ -1,15 +1,66 @@
+scale = 1.0
+
 material elastic [
-	 name = steel
+	 name = cathode
 	 rho = 1e3   # density
-	 E   = 1e3   # young's modulus
-	 nu  = 0.001 # poisson's ratio
-	 alpha = 1
+	 E   = 49e9  # young's modulus
+	 nu  = 0.25 # poisson's ratio
+	 alpha = 1e-3
+]
+
+material elastic [
+	 name = ceramic
+	 rho = 1e3   # density
+	 E   = 205e9   # young's modulus
+	 nu  = 0.24 # poisson's ratio
+	 alpha = 1e-3
+]
+
+material elastic [
+	 name = anode
+	 rho = 1e3   # density
+	 E   = 108e9   # young's modulus
+	 nu  = 0.27 # poisson's ratio
+	 alpha = 1e-3
+]
+
+
+material cohesive_linear [
+	 name = cathode_cathode
+	 beta = 1
+	 G_c = 1000*scale
+	 kappa = 1
+	 sigma_c = 1000*scale uniform [0, 0]
 ]
 
 material cohesive_linear [
-	 name = cohesive
+	 name = ceramic_ceramic
 	 beta = 1
-	 G_c = 100
+	 G_c = 1000*scale
 	 kappa = 1
-	 sigma_c = 100 uniform [0, 0]
+	 sigma_c = 1000*scale uniform [0, 0]
+]
+
+material cohesive_linear [
+	 name = anode_anode
+	 beta = 1
+	 G_c = 1000*scale
+	 kappa = 1
+	 sigma_c = 1000*scale uniform [0, 0]
+]
+
+material cohesive_linear [
+	 name = cathode_ceramic
+	 beta = 1
+	 G_c = 100*scale
+	 kappa = 1
+	 sigma_c = 100*scale uniform [0, 0]
+]
+
+material cohesive_linear [
+	 name = anode_ceramic
+	 beta = 1
+	 G_c = 100*scale
+	 kappa = 1
+	 sigma_c = 100*scale uniform [0, 0]
 ]
