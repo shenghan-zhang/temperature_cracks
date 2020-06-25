@@ -65,7 +65,7 @@ public:
     for (auto ghost_type : ghost_types) {
       qp.ghost_type = ghost_type;
       for (auto type :
-           field.elementTypes(_all_dimensions, ghost_type, _ek_not_defined)) {
+           field.elementTypes(ghost_type)) {
         qp.type = type;
         auto nb_quadrature_points = fe_engine.getNbIntegrationPoints(type);
         auto &&field_array = field(type, ghost_type);

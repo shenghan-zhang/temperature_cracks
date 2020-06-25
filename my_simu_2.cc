@@ -36,82 +36,14 @@
 
 /* -------------------------------------------------------------------------- */
 #include "solid_mechanics_model_cohesive.hh"
+#include "internal_field.hh"
 /* -------------------------------------------------------------------------- */
 #include <iostream>
 /* -------------------------------------------------------------------------- */
 
 using namespace akantu;
 
-typedef std::map< std::pair<ID, ID>, ID > MaterialRules;
 /* -------------------------------------------------------------------------- */
-class MaterialRulesMaterialSelector : public MeshDataMaterialSelector<std::string>{
- public:
-  MaterialRulesMaterialSelector(
-    SolidMechanicsModelCohesive & model, const MaterialRules & rules,
-    const ID & mesh_data_id) // what we have here is2 the name of model and also
-                             // the name of different materials
-    : MeshDataMaterialSelector<std::string>(mesh_data_id, model),
-      rules(rules),
-      mesh_data_id(mesh_data_id),
-      model(model),
-      mesh(model.getMesh()),
-      mesh_facets(model.getMeshFacets()),
-      spatial_dimension(model.getSpatialDimension()) {}
-
-/* -------------------------------------------------------------------------- */
-UInt operator()(const Element & element) {
-  if (mesh_facets.getSpatialDimension(element.type) ==
-      (spatial_dimension - 1)) {
-    const std::vector<Element> & element_to_subelement =
-        mesh_facets.getElementToSubelement(element.type,
-                                           element.ghost_type)(element.element);
-    const Element & el1 = element_to_subelement[0];
-    const Element & el2 = element_to_subelement[1];
-
-    ID id1 = mesh.getData<std::string>(mesh_data_id, el1.type,
-                                       el1.ghost_type)(el1.element);
-
-    ID id2 = id1;
-    if (el2 != ElementNull) {
-      id2 = mesh.getData<std::string>(mesh_data_id, el2.type,
-                                      el2.ghost_type)(el2.element);
-    } else {
-      std::cout << "Trying to set material\"("
-		<< id1 << ", " << id2
-		<< ")\" to a boundary facet" << std::endl;
-      Array<bool> & facets_check =
-	model.getElementInserter().getCheckFacets(element.type, element.ghost_type);
-      facets_check(element.element) = false;
-    }
-
-    MaterialRules::const_iterator rit = rules.find(std::make_pair(id1, id2));
-    if (rit == rules.end()) {
-      rit = rules.find(std::make_pair(id2, id1));
-    }
-
-    if (rit != rules.end()) {
-      return model.getMaterialIndex(rit->second);
-    } else {
-      DefaultMaterialCohesiveSelector cohesive_selector(model);
-      return cohesive_selector(element);
-    }
-  } else if (element.kind() == _ek_cohesive) {
-    DefaultMaterialCohesiveSelector cohesive_selector(model);
-    return cohesive_selector(element);
-  } else {
-    return MeshDataMaterialSelector::operator()(element);
-  }
-}
-  private:
-  SolidMechanicsModelCohesive & model;
-  ID mesh_data_id;
-  const Mesh & mesh;
-  const Mesh & mesh_facets;
-  UInt spatial_dimension;
-  MaterialRules rules;
-};
-/* -------------------------------------------------------------------------- */
-
 class InternalFieldSetter {
 public:
   InternalFieldSetter(SolidMechanicsModel &model, const ID &material)
@@ -132,10 +64,10 @@ public:
     auto &&fe_engine = model.getFEEngine();
 
     IntegrationPoint qp;
-    for (auto ghost_type : ghost_types) {
+    for (GhostType ghost_type : ghost_types) {
       qp.ghost_type = ghost_type;
       for (auto type :
-           field.elementTypes(_all_dimensions, ghost_type, _ek_not_defined)) {
+           field.elementTypes(ghost_type)) {
         qp.type = type;
         auto nb_quadrature_points = fe_engine.getNbIntegrationPoints(type);
         auto &&field_array = field(type, ghost_type);
@@ -159,6 +91,7 @@ private:
 
   ElementTypeMapArray<Real> quadrature_points;
 };
+/* -------------------------------------------------------------------------- */
 
 int main(int argc, char *argv[]) {
   initialize("material.dat", argc, argv);
@@ -172,15 +105,15 @@ int main(int argc, char *argv[]) {
   SolidMechanicsModelCohesive model(mesh);
 
   /// model initialization
-  MaterialRules rules;
+  MaterialCohesiveRules rules;
   rules[std::make_pair("cathode", "cathode")] = "cathode_cathode";
   rules[std::make_pair("ceramic", "ceramic")] = "ceramic_ceramic";
   rules[std::make_pair("anode", "anode")] = "anode_anode";
   rules[std::make_pair("cathode", "ceramic")] = "cathode_ceramic";
   rules[std::make_pair("anode", "ceramic")] = "anode_ceramic";
-  auto material_selector = std::make_shared<MaterialRulesMaterialSelector>(
-	model, rules, "physical_names");
-   model.setMaterialSelector(material_selector);
+  auto material_selector = std::make_shared<MaterialCohesiveRulesSelector>(
+      model, rules, "physical_names");
+  model.setMaterialSelector(material_selector);
    
   model.initFull(_analysis_method = _explicit_lumped_mass,
                  _is_extrinsic = true);
